@@ -129,6 +129,7 @@ version = "0.1.0"
 dependencies = [
  "faer",
  "num-complex",
+ "rayon",
 ]
 
 [[package]]

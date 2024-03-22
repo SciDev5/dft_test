@@ -13,6 +13,8 @@ pub trait Scalar:
     + Debug
     + Clone
     + Copy
+    + Sync
+    + Send
 {
     fn zero() -> Self;
     fn exp(self) -> Self;

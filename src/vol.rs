@@ -1,15 +1,17 @@
 use std::{
+    fmt::Display,
     ops::{Add, Div, Index, IndexMut, Mul, Sub},
-    rc::Rc,
+    sync::Arc,
 };
 
 use num_complex::Complex64;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::linear::{orthonormalize_basis, BasisSet, LinOperator, Linear, Scalar};
 
 #[derive(Debug, Clone)]
 pub struct Volume<T: Scalar, const DIM0: usize, const DIM1: usize, const DIM2: usize> {
-    field: Rc<[T]>,
+    field: Arc<[T]>,
 }
 impl<T: Scalar, const DIM0: usize, const DIM1: usize, const DIM2: usize>
     Volume<T, DIM0, DIM1, DIM2>
@@ -68,18 +70,31 @@ impl<T: Scalar, const DIM0: usize, const DIM1: usize, const DIM2: usize>
         [conv(i[0], dr), conv(i[1], dr), conv(i[2], dr)]
     }
 
-    pub fn volume_integral<F: Fn([f64; 3], [usize; 3], T) -> f64>(&self, dr: f64, f: F) -> f64 {
-        let mut accum = 0.0;
+    pub fn volume_integral<F: Sync + Fn([f64; 3], [usize; 3], T) -> f64>(
+        &self,
+        dr: f64,
+        f: F,
+    ) -> f64 {
+        // let mut accum = 0.0;
+        // let dv = dr * dr * dr;
+        // for i0 in 0..DIM0 {
+        //     for i1 in 0..DIM1 {
+        //         for i2 in 0..DIM2 {
+        //             let r = self.index_to_r([i0, i1, i2], dr);
+        //             accum += f(r, [i0, i1, i2], self[[i0, i1, i2]]) * dv
+        //         }
+        //     }
+        // }
+        // accum
+
         let dv = dr * dr * dr;
-        for i0 in 0..DIM0 {
-            for i1 in 0..DIM1 {
-                for i2 in 0..DIM2 {
-                    let r = self.index_to_r([i0, i1, i2], dr);
-                    accum += f(r, [i0, i1, i2], self[[i0, i1, i2]]) * dv
-                }
-            }
-        }
-        accum
+        (0..(DIM0 * DIM1 * DIM2))
+            .into_par_iter()
+            .map(|i| {
+                let j = [i % DIM0, (i / DIM0) % DIM1, i / DIM0 / DIM1];
+                f(self.index_to_r(j, dr), j, self.field[i]) * dv
+            })
+            .sum()
     }
     pub fn nabla_sq(&self, dr: f64) -> Self {
         let k = T::new_re(1.0 / (dr * dr));
@@ -180,6 +195,18 @@ impl<T: Scalar, const DIM0: usize, const DIM1: usize, const DIM2: usize> Linear<
             x = x + bra.field[i].hc() * ket.field[i];
         }
         x
+    }
+}
+
+impl<T: Scalar + Display, const DIM0: usize, const DIM1: usize, const DIM2: usize> Display
+    for Volume<T, DIM0, DIM1, DIM2>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{},{},{}", DIM0, DIM1, DIM2)?;
+        for v in self.field.iter() {
+            writeln!(f, "{}", v)?;
+        }
+        Ok(())
     }
 }
 
@@ -329,6 +356,19 @@ impl<'a, S: Scalar, const D0: usize, const D1: usize, const D2: usize> Sub
         for ij in 0..self.matrix_elements.len() {
             let t_ij = &mut self.matrix_elements[ij];
             *t_ij = *t_ij - rhs.matrix_elements[ij];
+        }
+        self
+    }
+}
+impl<'a, S: Scalar, const D0: usize, const D1: usize, const D2: usize> Add<S>
+    for VolumeLinOp<'a, S, D0, D1, D2>
+{
+    type Output = Self;
+    fn add(mut self, rhs: S) -> Self::Output {
+        // self + identity * scalar
+        for i in 0..self.len {
+            let t_ii = &mut self.matrix_elements[(self.len + 1) * i];
+            *t_ii = *t_ii + rhs;
         }
         self
     }
